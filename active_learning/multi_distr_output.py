@@ -1,6 +1,7 @@
 import logging
 from dataclasses import dataclass
 
+import numpy as np
 import torch
 from torch import nn, optim
 
@@ -22,28 +23,37 @@ class GaussianMixtureModel:
     def train(self, X, y):
 
         distrs = self._get_distrs(X)
+
         reshaped = torch.transpose(distrs, 0, 2)
         us, vars_, weights = reshaped
 
-        nlls = (torch.log(vars_) + torch.square((y - us) / vars_)) / 2
-
-        # offset vars_ by 1 so don't go crazy with nll
+        # nlls = (torch.log(vars_) + torch.square((y - us) / vars_)) / 2
+        #
+        # # offset vars_ by 1 so don't go crazy with nll
         # nlls = (torch.log(vars_ + 1) + torch.square((y - us) / (vars_ + 1))) / 2
-
+        #
         # weighted_nll = torch.mean(torch.sum(nlls * weights, axis=0) / torch.sum(weights, axis=0))
         # weighted_nll = torch.mean(nlls)
         # weighted_nll = torch.mean(torch.min(nlls, axis=0)[0])
-        min_idxs = torch.argmin(nlls, axis=0)
-        selected_mode_weights = torch.sum(weights, axis=0) / weights.gather(0, min_idxs[None, :])[0]
-        selected_nlls = nlls.gather(0, min_idxs[None, :])[0]
-        weighted_nll = torch.dot(selected_mode_weights, selected_nlls) / len(selected_nlls)
+        # min_idxs = torch.argmin(nlls, axis=0)
+        # selected_mode_weights = torch.sum(weights, axis=0) / weights.gather(0, min_idxs[None, :])[0]
+        # selected_nlls = nlls.gather(0, min_idxs[None, :])[0]
+        # weighted_nll = torch.dot(selected_mode_weights, selected_nlls) / len(selected_nlls)
+
+        normalized_weights = weights / weights.sum(axis=0)
+        likelihood = sum(
+            w * torch.exp(-torch.square(y - u) / var / 2) / torch.sqrt(2 * np.pi * var)
+            for w, u, var in zip(normalized_weights, us, vars_)
+        )
+        nll = -torch.log(likelihood).mean()
 
         self.optimizer.zero_grad()
-        weighted_nll.backward()
+        # weighted_nll.backward()
+        nll.backward()
         self.optimizer.step()
 
-        logger.info('Weighted nll %f', weighted_nll)
-        return weighted_nll
+        logger.info('NLL %f', nll)
+        return nll
 
     def evaluate(self, X):
 
