@@ -23,11 +23,20 @@ class GaussianMixtureModel:
 
         distrs = self._get_distrs(X)
         reshaped = torch.transpose(distrs, 0, 2)
-        us, vars, weights = reshaped
-        nlls = (torch.log(vars) + torch.square((y - us) / vars)) / 2
+        us, vars_, weights = reshaped
+
+        nlls = (torch.log(vars_) + torch.square((y - us) / vars_)) / 2
+
+        # offset vars_ by 1 so don't go crazy with nll
+        # nlls = (torch.log(vars_ + 1) + torch.square((y - us) / (vars_ + 1))) / 2
+
         # weighted_nll = torch.mean(torch.sum(nlls * weights, axis=0) / torch.sum(weights, axis=0))
         # weighted_nll = torch.mean(nlls)
-        weighted_nll = torch.mean(torch.min(nlls, axis=0)[0])
+        # weighted_nll = torch.mean(torch.min(nlls, axis=0)[0])
+        min_idxs = torch.argmin(nlls, axis=0)
+        selected_mode_weights = torch.sum(weights, axis=0) / weights.gather(0, min_idxs[None, :])[0]
+        selected_nlls = nlls.gather(0, min_idxs[None, :])[0]
+        weighted_nll = torch.dot(selected_mode_weights, selected_nlls) / len(selected_nlls)
 
         self.optimizer.zero_grad()
         weighted_nll.backward()
