@@ -8,6 +8,9 @@ from torch import nn, optim
 logger = logging.getLogger()
 
 
+LIKELIHOOD_EPSILON = 1e-8
+
+
 @dataclass
 class GaussianMixtureModel:
 
@@ -22,11 +25,12 @@ class GaussianMixtureModel:
 
     def train(self, X, y):
 
-        distrs = self._get_distrs(X)
+        distrs = self.cgmm(X)
 
         reshaped = torch.transpose(distrs, 0, 2)
         us, vars_, weights = reshaped
 
+        # Code below will try to force a single mode to be chosen
         # nlls = (torch.log(vars_) + torch.square((y - us) / vars_)) / 2
         #
         # # offset vars_ by 1 so don't go crazy with nll
@@ -40,12 +44,11 @@ class GaussianMixtureModel:
         # selected_nlls = nlls.gather(0, min_idxs[None, :])[0]
         # weighted_nll = torch.dot(selected_mode_weights, selected_nlls) / len(selected_nlls)
 
-        normalized_weights = weights / weights.sum(axis=0)
         likelihood = sum(
             w * torch.exp(-torch.square(y - u) / var / 2) / torch.sqrt(2 * np.pi * var)
-            for w, u, var in zip(normalized_weights, us, vars_)
+            for w, u, var in zip(weights, us, vars_)
         )
-        nll = -torch.log(likelihood).mean()
+        nll = -torch.log(likelihood + LIKELIHOOD_EPSILON).mean()
 
         self.optimizer.zero_grad()
         # weighted_nll.backward()
@@ -58,12 +61,7 @@ class GaussianMixtureModel:
     def evaluate(self, X):
 
         with torch.no_grad():
-            return self._get_distrs(X)
-
-    def _get_distrs(self, X):
-        distrs = self.cgmm(X)
-        reshaped = torch.reshape(distrs, (-1, self.num_mixes, 3))
-        return reshaped
+            return self.cgmm(X)
 
 
 class ConditionalGaussianMixtureModule(nn.Module):
@@ -102,6 +100,13 @@ class ConditionalGaussianMixtureModule(nn.Module):
             distrs[:, i * 3 + 1] = torch.sqrt(torch.exp(distr[:, 1]))
             distrs[:, i * 3 + 2] = torch.sigmoid(distr[:, 2])
 
-        return distrs
+        reshaped = torch.reshape(distrs, (-1, self.num_mixes, 3))
+
+        us, vars_, weights = reshaped.T
+        weights = weights / weights.sum(axis=0)
+
+        normalized = torch.stack([us, vars_, weights]).T
+
+        return normalized
 
 
