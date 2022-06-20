@@ -1,14 +1,16 @@
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
+from sklearn.tree import BaseDecisionTree
 
 
-class DisaggregatedRFRegressor(RandomForestRegressor):
+# Note: Doesn't actually make sense to have different classes for clf/reg since underlying decision trees will
+# predict proba 0/1 anyways, so might as well predict
+class DisaggregatedRFMixin(RandomForestRegressor):
     def predict(self, X) -> np.ndarray:
         res = []
 
         for dt in self.estimators_:
-            dt: DecisionTreeRegressor
+            dt: BaseDecisionTree
             res.append(dt.predict(X))
 
         res = np.array(res).T
@@ -16,14 +18,9 @@ class DisaggregatedRFRegressor(RandomForestRegressor):
         return res
 
 
-class DisaggregatedRFClassifier(RandomForestClassifier):
-    def predict_proba(self, X) -> np.ndarray:
-        res = []
+class DisaggregatedRFRegressor(DisaggregatedRFMixin, RandomForestRegressor):
+    pass
 
-        for dt in self.estimators_:
-            dt: DecisionTreeClassifier
-            res.append(dt.predict_proba(X))
 
-        res = np.array(res).T
-
-        return res
+class DisaggregatedRFClassifier(DisaggregatedRFMixin, RandomForestClassifier):
+    pass
